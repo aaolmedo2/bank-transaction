@@ -12,7 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 
 @RestController
-@RequestMapping("/api/v1/transacciones")
+@RequestMapping("/api/transacciones/v1")
 @Slf4j
 public class TransaccionesController {
 
