@@ -1,6 +1,9 @@
 package com.banquito.core.bank.transaction.consumer;
 
 import com.banquito.core.bank.transaction.dto.TransaccionesSolicitudDTO;
+import com.banquito.core.bank.transaction.exception.CuentaNoEncontradaException;
+import com.banquito.core.bank.transaction.exception.SaldoInsuficienteException;
+import com.banquito.core.bank.transaction.exception.TransaccionException;
 import com.banquito.core.bank.transaction.model.Transacciones;
 import com.banquito.core.bank.transaction.service.TransaccionesService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,21 +26,15 @@ public class TransaccionesConsumer {
     }
 
     // Consumer para cola de DEPÓSITOS
-    @JmsListener(destination = "${colas.deposito.queue-name}", concurrency = "2-5")
+    @JmsListener(destination = "${colas.transacciones.deposito}", concurrency = "2-5")
     public void procesarDeposito(Message message) {
         procesarTransaccion(message, "DEPOSITO");
     }
 
     // Consumer para cola de RETIROS
-    @JmsListener(destination = "${colas.retiro.queue-name}", concurrency = "2-5")
+    @JmsListener(destination = "${colas.transacciones.retiro}", concurrency = "2-5")
     public void procesarRetiro(Message message) {
         procesarTransaccion(message, "RETIRO");
-    }
-
-    // Consumer para cola de TRANSFERENCIAS
-    @JmsListener(destination = "${colas.transferencia.queue-name}", concurrency = "2-5")
-    public void procesarTransferencia(Message message) {
-        procesarTransaccion(message, "TRANSFERENCIA");
     }
 
     // Método común para procesar transacciones de cualquier tipo
@@ -86,13 +83,6 @@ public class TransaccionesConsumer {
                 throw new IllegalArgumentException("Monto debe ser mayor que cero");
             }
 
-            // Validación específica para transferencias
-            if ("TRANSFERENCIA".equals(tipoEsperado)) {
-                if (dto.getNumeroCuentaDestino() == null || dto.getNumeroCuentaDestino().trim().isEmpty()) {
-                    throw new IllegalArgumentException("NumeroCuentaDestino es requerido para transferencias");
-                }
-            }
-
             // EJECUTAR la transacción (MS1 ya validó todo)
             Transacciones resultado = transaccionesService.procesar(dto);
 
@@ -102,12 +92,37 @@ public class TransaccionesConsumer {
         } catch (JMSException e) {
             log.error("MS2 EJECUTOR - Error al extraer mensaje JMS {}: {}", tipoEsperado, e.getMessage(), e);
             throw new RuntimeException("Error procesando mensaje JMS: " + e.getMessage(), e);
+        } catch (SaldoInsuficienteException e) {
+            // Error de negocio: solo log del error sin stack trace completo
+            log.error("MS2 EJECUTOR - Error de negocio en transacción {} de cuenta {}: {}",
+                    tipoEsperado, dto != null ? dto.getNumeroCuentaOrigen() : "unknown", e.getMessage());
+
+            // No re-lanzar para evitar stack trace en logs - la transacción ya está marcada
+            // como ERROR
+
+        } catch (CuentaNoEncontradaException e) {
+            // Error de negocio: solo log del error sin stack trace completo
+            log.error("MS2 EJECUTOR - Error de negocio en transacción {} de cuenta {}: {}",
+                    tipoEsperado, dto != null ? dto.getNumeroCuentaOrigen() : "unknown", e.getMessage());
+
+            // No re-lanzar para evitar stack trace en logs - la transacción ya está marcada
+            // como ERROR
+
+        } catch (TransaccionException e) {
+            // Error de negocio: solo log del error sin stack trace completo
+            log.error("MS2 EJECUTOR - Error de negocio en transacción {} de cuenta {}: {}",
+                    tipoEsperado, dto != null ? dto.getNumeroCuentaOrigen() : "unknown", e.getMessage());
+
+            // No re-lanzar para evitar stack trace en logs - la transacción ya está marcada
+            // como ERROR
+
         } catch (Exception e) {
-            log.error("MS2 EJECUTOR - Error ejecutando transacción {} de cuenta {}: {}",
+            log.error("MS2 EJECUTOR - Error técnico ejecutando transacción {} de cuenta {}: {}",
                     tipoEsperado, dto != null ? dto.getNumeroCuentaOrigen() : "unknown", e.getMessage(), e);
 
-            // Re-lanzar para que ActiveMQ maneje retry/DLQ si está configurado
-            throw new RuntimeException("Error ejecutando transacción: " + e.getMessage(), e);
+            // Re-lanzar solo errores técnicos para que ActiveMQ maneje retry/DLQ si está
+            // configurado
+            throw new RuntimeException("Error técnico ejecutando transacción: " + e.getMessage(), e);
         }
     }
 }

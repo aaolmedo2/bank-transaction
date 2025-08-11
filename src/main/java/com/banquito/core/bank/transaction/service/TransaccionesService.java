@@ -46,9 +46,6 @@ public class TransaccionesService {
                 case RETIRO:
                     procesarRetiro(dto);
                     break;
-                case TRANSFERENCIA:
-                    procesarTransferencia(dto);
-                    break;
                 default:
                     throw new TransaccionException("Tipo de transacción no válido: " + dto.getTipoTransaccion());
             }
@@ -133,71 +130,10 @@ public class TransaccionesService {
                 cuenta.getNumeroCuenta(), saldoAnterior, dto.getMonto(), nuevoSaldo);
     }
 
-    private void procesarTransferencia(TransaccionesSolicitudDTO dto) {
-        log.debug("Ejecutando transferencia desde cuenta: {} hacia cuenta: {}",
-                dto.getNumeroCuentaOrigen(), dto.getNumeroCuentaDestino());
-
-        // MS1 ya validó todo, nosotros solo ejecutamos
-        if (dto.getNumeroCuentaDestino() == null) {
-            throw new TransaccionException("La cuenta destino es requerida para transferencias");
-        }
-
-        // Obtener cuentas con bloqueo - ordenar por número de cuenta para evitar
-        // deadlock
-        String cuenta1 = dto.getNumeroCuentaOrigen().compareTo(dto.getNumeroCuentaDestino()) < 0
-                ? dto.getNumeroCuentaOrigen()
-                : dto.getNumeroCuentaDestino();
-        String cuenta2 = dto.getNumeroCuentaOrigen().compareTo(dto.getNumeroCuentaDestino()) < 0
-                ? dto.getNumeroCuentaDestino()
-                : dto.getNumeroCuentaOrigen();
-
-        CuentaCliente cuentaA = obtenerCuentaPorNumero(cuenta1);
-        CuentaCliente cuentaB = obtenerCuentaPorNumero(cuenta2);
-
-        CuentaCliente cuentaOrigen = dto.getNumeroCuentaOrigen().equals(cuenta1) ? cuentaA : cuentaB;
-        CuentaCliente cuentaDestino = dto.getNumeroCuentaDestino().equals(cuenta1) ? cuentaA : cuentaB;
-
-        // Solo validar que las cuentas existan y estén activas
-        validarCuentaActiva(cuentaOrigen);
-        validarCuentaActiva(cuentaDestino);
-
-        // Validación mínima de seguridad: verificar saldo en cuenta origen
-        if (cuentaOrigen.getSaldo().compareTo(dto.getMonto()) < 0) {
-            log.warn("ALERTA: Saldo insuficiente al ejecutar transferencia. Cuenta: {}, Saldo: {}, Monto: {}",
-                    cuentaOrigen.getNumeroCuenta(), cuentaOrigen.getSaldo(), dto.getMonto());
-            throw new SaldoInsuficienteException(
-                    String.format("Saldo insuficiente al ejecutar transferencia. Saldo: %s, Monto: %s",
-                            cuentaOrigen.getSaldo(), dto.getMonto()));
-        }
-
-        // Ejecutar la transferencia
-        BigDecimal saldoOrigenAnterior = cuentaOrigen.getSaldo();
-        BigDecimal saldoDestinoAnterior = cuentaDestino.getSaldo();
-
-        BigDecimal nuevoSaldoOrigen = saldoOrigenAnterior.subtract(dto.getMonto());
-        BigDecimal nuevoSaldoDestino = saldoDestinoAnterior.add(dto.getMonto());
-
-        cuentaOrigen.setSaldo(nuevoSaldoOrigen);
-        cuentaDestino.setSaldo(nuevoSaldoDestino);
-
-        cuentaClienteRepository.save(cuentaOrigen);
-        cuentaClienteRepository.save(cuentaDestino);
-
-        log.info("Transferencia ejecutada - Origen: {} ({} -> {}), Destino: {} ({} -> {})",
-                cuentaOrigen.getNumeroCuenta(), saldoOrigenAnterior, nuevoSaldoOrigen,
-                cuentaDestino.getNumeroCuenta(), saldoDestinoAnterior, nuevoSaldoDestino);
-    }
-
     private CuentaCliente obtenerCuentaPorNumero(String numeroCuenta) {
         return cuentaClienteRepository.findByNumeroCuentaWithLock(numeroCuenta)
                 .orElseThrow(() -> new CuentaNoEncontradaException(
                         "Cuenta no encontrada con número: " + numeroCuenta));
-    }
-
-    private CuentaCliente obtenerCuentaConBloqueo(Integer idCuenta) {
-        return cuentaClienteRepository.findByIdWithLock(idCuenta)
-                .orElseThrow(() -> new CuentaNoEncontradaException(
-                        "Cuenta no encontrada con ID: " + idCuenta));
     }
 
     private void validarCuentaActiva(CuentaCliente cuenta) {
