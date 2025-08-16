@@ -42,6 +42,9 @@ public class OpenApiConfig {
                                 .url("http://localhost:" + serverPort)
                                 .description("Servidor de desarrollo local"),
                         new Server()
+                                .url("http://banquito-alb-1166574131.us-east-2.elb.amazonaws.com/api/banktransaction")
+                                .description("Servidor AWS Load Balancer"),
+                        new Server()
                                 .url("https://api.banquito.com")
                                 .description("Servidor de producción")))
                 .tags(List.of(
